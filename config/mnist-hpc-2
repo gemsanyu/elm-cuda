@@ -1,0 +1,7 @@
+mnist
+60000
+784
+10
+1000
+0.1
+hpc-1-running-time.csv
