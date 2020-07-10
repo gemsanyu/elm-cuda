@@ -82,6 +82,16 @@ ConfigTest readConfigTest(string configFileName){
   return config;
 }
 
+void writeMatrixfToFileBinary(std::string fileName, float* matrix, int m, int n){
+  fileName = fileName + ".bin";
+  printf("Writing Matrix to file %s\n", fileName);
+  printf("Rows = %d, Col = %d\n", m, n);
+
+  ofstream outFile(fileName, ios::trunc | ios::binary);
+  outFile.write((char *) matrix, m*n*sizeof(float));
+  outFile.close();
+}
+
 void writeRunningTimeData(string fileName, RunningTimeData rt){
   printf("Writing output data to file %s\n", fileName);
   FILE *outFile;

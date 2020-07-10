@@ -1,7 +1,7 @@
 mnist
-600
+1000
 784
 10
-100
+500
 0.1
 pc-running-time.csv

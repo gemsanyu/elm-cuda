@@ -51,6 +51,41 @@ void activationFunction(float *d_A, int m, int n){
   cudaFree(&d_n);
 }
 
+__global__ void d_fillDiag(float* d_A, int *d_m, int *d_n, float *d_alfa){
+  int m = (*d_m);
+  int n = (*d_n);
+  float alfa = (*d_alfa);
+  int bIdx = blockIdx.x;
+  int tIdx = threadIdx.x;
+  int stride = blockDim.x;
+  int id = bIdx*stride + tIdx;
+  if (id < m && id < n){
+    int cell = id*n + id;
+    d_A[cell]+=alfa;
+  }
+}
+
+void fillDiag(float* d_A, int m, int n, float alfa){
+  int *d_m;
+  cudaMalloc(&d_m, sizeof(int));
+  cudaMemcpy(d_m, &m, sizeof(int), cudaMemcpyHostToDevice);
+
+  int *d_n;
+  cudaMalloc(&d_n, sizeof(int));
+  cudaMemcpy(d_n, &n, sizeof(int), cudaMemcpyHostToDevice);
+
+  float *d_alfa;
+  cudaMalloc(&d_alfa, sizeof(float));
+  cudaMemcpy(d_alfa, &alfa, sizeof(float), cudaMemcpyHostToDevice);
+
+  int gridSize = m/BLOCK_SIZE + 1;
+  d_fillDiag<<< gridSize, BLOCK_SIZE >>>(d_A, d_m, d_n, d_alfa);
+
+  cudaFree(d_m);
+  cudaFree(d_n);
+  cudaFree(d_alfa);
+}
+
 __global__ void d_GetIdentityMatrix(float *d_A, int *d_m, float *d_Alfa){
   int m = (*d_m);
   float alfa = *d_Alfa;
@@ -189,7 +224,7 @@ float* getPseudoInverse(cublasHandle_t cublasH, cusolverDnHandle_t cusolverH,
     lwork,
     d_rwork,
     devInfo);
-  printf("%d %d %d\n ", cusolverStat, CUSOLVER_STATUS_SUCCESS, CUSOLVER_STATUS_INVALID_VALUE);
+  // printf("%d %d %d\n ", cusolverStat, CUSOLVER_STATUS_SUCCESS, CUSOLVER_STATUS_INVALID_VALUE);
   assert(cusolverStat == CUSOLVER_STATUS_SUCCESS);
   cudaFree(&devInfo);
   cudaFree(&d_work);

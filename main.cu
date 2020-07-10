@@ -165,21 +165,78 @@ int main(int argc, char ** argv){
   cudaMalloc(&d_A, hiddenNeuron*hiddenNeuron*sizeof(float));
   cublasStat = cublasSgemm_v2(cublasH, CUBLAS_OP_N, CUBLAS_OP_T, hiddenNeuron, hiddenNeuron,
     row, &gemmA, d_H, hiddenNeuron, d_H, hiddenNeuron, &gemmB, d_A, hiddenNeuron);
+  fillDiag(d_A, hiddenNeuron, hiddenNeuron, 1/config.alpha);
   end = MPI_Wtime();
   rt.maxA = end-start;
 
-
-
   start = MPI_Wtime();
-	// MatrixXf temp1, temp2;
-	// temp1.noalias() = A.inverse();
-	// temp2.noalias() = H.transpose() * Y;
-	// W = temp1.lazyProduct(temp2);
-  // // Freeing some memory
-  // temp1.resize(0,0);
-  // temp2.resize(0,0);
+  float *d_Temp;
+  cudaMalloc(&d_Temp, hiddenNeuron*classNum*sizeof(float));
+  cublasStat = cublasSgemm_v2(cublasH, CUBLAS_OP_N, CUBLAS_OP_T, classNum, hiddenNeuron, row,
+    &gemmA, d_Y, classNum, d_H, hiddenNeuron, &gemmB, d_Temp, classNum);
+  float *d_Ainv = getPseudoInverse(cublasH, cusolverH, d_A, hiddenNeuron, hiddenNeuron);
+  float *d_W;
+  cudaMalloc(&d_W, hiddenNeuron*classNum*sizeof(float));
+  cublasStat = matMul(cublasH, d_Ainv, d_Temp, d_W, hiddenNeuron, hiddenNeuron, classNum);
+  cudaFree(d_Ainv);
+  cudaFree(d_Temp);
   end = MPI_Wtime();
   rt.maxW = end-start;
+
+  /*
+    Recombining all the output wieghts
+    if K=1, then return the W else
+      combine the A then combine the W
+      we'll try to use gather here, see what we got
+  */
+  start = MPI_Wtime();
+  float *d_WOutput;
+  if (numOfProcess == 1){
+    d_WOutput = d_W;
+  }else{
+    // Combining A
+    float* d_ACombined;
+    if (rank == ROOT){
+      cudaMalloc(&d_ACombined, hiddenNeuron*hiddenNeuron*sizeof(float));
+    }
+    MPI_Reduce(d_A, d_ACombined, hiddenNeuron*hiddenNeuron, MPI_FLOAT, MPI_SUM,
+      ROOT, MPI_COMM_WORLD);
+    if (rank == ROOT){
+      fillDiag(d_ACombined, hiddenNeuron, hiddenNeuron, (numOfProcess-1.0)/config.alpha);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    float *d_TempWOutput;
+    if (rank == ROOT){
+      cudaMalloc(&d_TempWOutput, hiddenNeuron*classNum*sizeof(float));
+    }
+    float *d_Temp2;
+    cudaMalloc(&d_Temp2, hiddenNeuron*classNum*sizeof(float));
+    cublasStat = matMul(cublasH, d_A, d_W, d_Temp2, hiddenNeuron, hiddenNeuron, classNum);
+    MPI_Reduce(d_Temp2, d_TempWOutput, hiddenNeuron*classNum, MPI_FLOAT, MPI_SUM, ROOT, MPI_COMM_WORLD);
+    cudaFree(d_Temp2);
+    if (rank == ROOT){
+      cudaMalloc(&d_WOutput, hiddenNeuron*classNum*sizeof(float));
+      float *d_AComInv = getPseudoInverse(cublasH, cusolverH, d_ACombined, hiddenNeuron, hiddenNeuron);
+      matMul(cublasH, d_AComInv, d_TempWOutput, d_WOutput, hiddenNeuron, hiddenNeuron, classNum);
+      cudaFree(d_AComInv);
+      cudaFree(d_TempWOutput);
+    }
+    // temp.resize(0,0);
+  }
+
+  /*
+    Save the output weight
+    and write the output time
+  */
+  start = MPI_Wtime();
+  if (rank == ROOT){
+    writeMatrixfToFileBinary(config.wInputFileName, WInput, col+1, hiddenNeuron);
+
+    float *WOutput = (float*) malloc(hiddenNeuron*classNum*sizeof(float));
+    cublasStat = cublasGetMatrix(hiddenNeuron, classNum, sizeof(float), d_WOutput, hiddenNeuron, WOutput, hiddenNeuron); // cp d_c - >c
+    writeMatrixfToFileBinary(config.wOutputFileName, WOutput, hiddenNeuron, classNum);
+  }
 
   // Summarize the running time
   double readTime,writeTime,genWTime,maxH, maxA, maxW;

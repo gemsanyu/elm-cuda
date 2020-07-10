@@ -33,5 +33,6 @@ float* generateWeightInput(int row, int col);
 Config readConfig(std::string configFileName);
 ConfigTest readConfigTest(std::string configFileName);
 void writeRunningTimeData(std::string fileName, RunningTimeData rt);
+void writeMatrixfToFileBinary(std::string fileName, float* matrix, int m, int n);
 void writeAccuracyData(std::string fileName, AccuracyData accuracyData);
 #endif
