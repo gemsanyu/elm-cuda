@@ -43,6 +43,10 @@ int main(int argc, char ** argv){
   RunningTimeData rt;
   double start, end, realStart, realEnd;
 
+  /*
+    cublasgemm param
+  */
+  float gemmA=1.0f, gemmB=0;
 
   /*
     Read the config file
@@ -103,7 +107,8 @@ int main(int argc, char ** argv){
 
   float *d_X;
   cudaMalloc(&d_X, row*(col+1)*sizeof(float));
-  cudaMemcpy(d_X, X, row*(col+1)*sizeof(float), cudaMemcpyHostToDevice);
+  cublasStat = cublasSetMatrix(row, col+1, sizeof(float), X, row, d_X, row);
+  // cudaMemcpy(d_X, X, row*(col+1)*sizeof(float), cudaMemcpyHostToDevice);
 
   float *Y = (float*) malloc(row*classNum*sizeof(float));
   MPI_File yFile;
@@ -113,7 +118,8 @@ int main(int argc, char ** argv){
 
   float *d_Y;
   cudaMalloc(&d_Y, row*classNum*sizeof(float));
-  cudaMemcpy(d_Y, Y, row*classNum*sizeof(float), cudaMemcpyHostToDevice);
+  cublasStat = cublasSetMatrix(row, classNum, sizeof(float), Y, row, d_Y, row);
+  // cudaMemcpy(d_Y, Y, row*classNum*sizeof(float), cudaMemcpyHostToDevice);
 
   end = MPI_Wtime();
   rt.readDataTime = end-start;
@@ -129,7 +135,8 @@ int main(int argc, char ** argv){
   if (rank == ROOT){
     WInput = generateWeightInput(col+1, hiddenNeuron);
     cudaMalloc(&d_WInput, (col+1)*hiddenNeuron*sizeof(float));
-    cudaMemcpy(d_WInput, WInput, (col+1)*hiddenNeuron*sizeof(float), cudaMemcpyHostToDevice);
+    cublasStat = cublasSetMatrix(col+1, hiddenNeuron, sizeof(float), WInput, col+1, d_WInput, col+1);
+    // cudaMemcpy(d_WInput, WInput, (col+1)*hiddenNeuron*sizeof(float), cudaMemcpyHostToDevice);
   } else {
     cudaMalloc(&d_WInput, (col+1)*hiddenNeuron*sizeof(float));
   }
@@ -145,13 +152,34 @@ int main(int argc, char ** argv){
 
     Start the calculation because life is good
   */
-
+  start = MPI_Wtime();
   float *d_H;
   cudaMalloc(&d_H, row*hiddenNeuron*sizeof(float));
   matMul(cublasH, d_X, d_WInput, d_H, row, col+1, hiddenNeuron, true);
   activationFunction(d_H, row, hiddenNeuron);
+  end = MPI_Wtime();
+  rt.maxH = end-start;
 
-  MPI_Barrier();
+  start = MPI_Wtime();
+	float *d_A;
+  cudaMalloc(&d_A, hiddenNeuron*hiddenNeuron*sizeof(float));
+  cublasStat = cublasSgemm_v2(cublasH, CUBLAS_OP_N, CUBLAS_OP_T, hiddenNeuron, hiddenNeuron,
+    row, &gemmA, d_H, hiddenNeuron, d_H, hiddenNeuron, &gemmB, d_A, hiddenNeuron);
+  end = MPI_Wtime();
+  rt.maxA = end-start;
+
+
+
+  start = MPI_Wtime();
+	// MatrixXf temp1, temp2;
+	// temp1.noalias() = A.inverse();
+	// temp2.noalias() = H.transpose() * Y;
+	// W = temp1.lazyProduct(temp2);
+  // // Freeing some memory
+  // temp1.resize(0,0);
+  // temp2.resize(0,0);
+  end = MPI_Wtime();
+  rt.maxW = end-start;
 
   // Summarize the running time
   double readTime,writeTime,genWTime,maxH, maxA, maxW;
@@ -178,7 +206,7 @@ int main(int argc, char ** argv){
   cudaFree(&d_H);
   cudaFree(&d_X);
   cudaFree(&d_Y);
-  // cublasStat = cublasDestroy_v2(cublasH);
-  // cusolverStat = cusolverDnDestroy(cusolverH);
+  cublasStat = cublasDestroy_v2(cublasH);
+  cusolverStat = cusolverDnDestroy(cusolverH);
   MPI_Finalize();
 }
